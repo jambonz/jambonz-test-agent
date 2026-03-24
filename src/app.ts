@@ -107,16 +107,13 @@ fluxSvc.on('session:new', (session) => {
   });
 });
 
-/* AssemblyAI universal-3 pro + native turn detection */
+/* AssemblyAI u3-rt-pro + native turn detection */
 const aaiSvc = makeService({ path: '/aai' });
 aaiSvc.on('session:new', (session) => {
   handleSession(session, {
     stt: {
       vendor: 'assemblyai',
       assemblyAiOptions: {
-        speechModel: 'universal-3-pro',
-        serviceVersion: 'v3',
-        endOfTurnConfidenceThreshold: 0.5,
         languageDetection: true,
       },
     },
