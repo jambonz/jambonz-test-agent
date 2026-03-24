@@ -49,6 +49,15 @@ function handleSession(session: Session, opts: PipelineOptions) {
   const voice = session.data.env_vars?.CARTESIA_VOICE || '9626c31c-bec5-4cca-baa8-f8ba9e84c8bc';
   const systemPrompt = session.data.env_vars?.SYSTEM_PROMPT || envVars.SYSTEM_PROMPT.default;
 
+  session.on('/pipeline-event', (evt: Record<string, unknown>) => {
+    if (evt.type === 'turn_end') {
+      const { transcript, response, interrupted, latency } = evt as Record<string, unknown>;
+      console.log('turn_end', JSON.stringify({ transcript, response, interrupted, latency }, null, 2));
+    } else {
+      console.log(`pipeline event: ${evt.type}`);
+    }
+  });
+
   session.on('/pipeline-complete', (evt: Record<string, unknown>) => {
     console.log('pipeline completed', evt);
     session.hangup().reply();
@@ -76,6 +85,7 @@ function handleSession(session: Session, opts: PipelineOptions) {
         enable: true,
         minSpeechDuration: 0.5,
       },
+      eventHook: '/pipeline-event',
       actionHook: '/pipeline-complete',
     })
     .send();
