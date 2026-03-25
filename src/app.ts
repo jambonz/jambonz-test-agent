@@ -83,7 +83,6 @@ function handleSession(session: Session, opts: PipelineOptions) {
       earlyGeneration: true,
       bargeIn: {
         enable: true,
-        minSpeechDuration: 0.5,
       },
       eventHook: '/pipeline-event',
       actionHook: '/pipeline-complete',
