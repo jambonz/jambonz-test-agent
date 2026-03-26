@@ -14,8 +14,8 @@ const envVars = {
   },
   ELEVENLABS_VOICE: {
     type: 'string' as const,
-    description: 'ElevenLabs voice name',
-    default: 'Rachel',
+    description: 'ElevenLabs voice id',
+    default: 'hpp4J3VqNfWAUOO0d1Us',
   },
   SYSTEM_PROMPT: {
     type: 'string' as const,
