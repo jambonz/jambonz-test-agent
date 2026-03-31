@@ -13,7 +13,7 @@
     "node": ">=22.0.0"
   },
   "dependencies": {
-    "@jambonz/sdk": "^0.1.18"
+    "@jambonz/sdk": "^0.1.27"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
