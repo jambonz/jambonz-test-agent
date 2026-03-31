@@ -1,5 +1,8 @@
 import * as http from 'node:http';
+import pino from 'pino';
 import { createEndpoint, Session } from '@jambonz/sdk/websocket';
+
+const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 
 const envVars = {
   OPENAI_MODEL: {
@@ -57,22 +60,18 @@ interface PipelineOptions {
 }
 
 function handleSession(session: Session, opts: PipelineOptions) {
+  const log = logger.child({ call_sid: session.callSid });
   const model = session.data.env_vars?.OPENAI_MODEL || 'gpt-4.1-mini';
   const voice = session.data.env_vars?.[opts.tts.voiceEnvVar]
     || envVars[opts.tts.voiceEnvVar as keyof typeof envVars]?.default;
   const systemPrompt = session.data.env_vars?.SYSTEM_PROMPT || envVars.SYSTEM_PROMPT.default;
 
   session.on('/pipeline-event', (evt: Record<string, unknown>) => {
-    if (evt.type === 'turn_end') {
-      const { transcript, response, interrupted, latency } = evt as Record<string, unknown>;
-      console.log('turn_end', JSON.stringify({ transcript, response, interrupted, latency }, null, 2));
-    } else {
-      console.log(`pipeline event: ${evt.type}`);
-    }
+    log.info({payload: evt}, `pipeline event: ${evt.type}`);
   });
 
   session.on('/pipeline-complete', (evt: Record<string, unknown>) => {
-    console.log('pipeline completed', evt);
+    log.info({payload: evt}, 'pipeline completed');
     session.hangup().reply();
   });
 
@@ -165,4 +164,4 @@ elSvc.on('session:new', (session) => {
   });
 });
 
-console.log(`jambonz voice agent listening on port ${port}`);
+logger.info({ port }, 'jambonz voice agent listening');
