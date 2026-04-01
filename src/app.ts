@@ -58,6 +58,7 @@ interface PipelineOptions {
   stt: SttConfig;
   tts: TtsConfig;
   turnDetection: 'krisp' | 'stt';
+  noiseIsolation?: 'krisp' | 'rnnoise';
 }
 
 function handleSession(session: Session, opts: PipelineOptions) {
@@ -94,6 +95,7 @@ function handleSession(session: Session, opts: PipelineOptions) {
         },
       },
       turnDetection: opts.turnDetection,
+      ...opts.noiseIsolation && { noiseIsolation: opts.noiseIsolation },
       earlyGeneration: true,
       bargeIn: {
         enable: true,
@@ -119,6 +121,7 @@ svc.on('session:new', (session) => {
     },
     tts: { vendor: 'cartesia', voiceEnvVar: 'CARTESIA_VOICE' },
     turnDetection: 'krisp',
+    noiseIsolation: 'krisp',
   });
 });
 
@@ -129,6 +132,7 @@ fluxSvc.on('session:new', (session) => {
     stt: { vendor: 'deepgramflux' },
     tts: { vendor: 'cartesia', voiceEnvVar: 'CARTESIA_VOICE' },
     turnDetection: 'stt',
+    noiseIsolation: 'krisp',
   });
 });
 
@@ -144,6 +148,7 @@ aaiSvc.on('session:new', (session) => {
     },
     tts: { vendor: 'cartesia', voiceEnvVar: 'CARTESIA_VOICE' },
     turnDetection: 'stt',
+    noiseIsolation: 'krisp',
   });
 });
 
@@ -162,6 +167,7 @@ elSvc.on('session:new', (session) => {
       options: { model_id: 'eleven_flash_v2_5' },
     },
     turnDetection: 'krisp',
+    noiseIsolation: 'krisp',
   });
 });
 
