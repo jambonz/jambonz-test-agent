@@ -1,6 +1,6 @@
 # jambonz-agent
 
-A jambonz voice AI agent using the `pipeline` verb with multiple STT backends for comparing turn detection strategies.
+A jambonz voice AI agent using the `agent` verb with multiple STT backends for comparing turn detection strategies.
 
 ## Callflows
 
@@ -69,4 +69,4 @@ Create a jambonz application with the WebSocket URL pointing to the desired call
 - `ws://<host>:3105/flux` for Deepgram Flux
 - `ws://<host>:3105/aai` for AssemblyAI
 
-Requires jambonz server version 10.1.0+ (the `pipeline` verb is commercial-only).
+Requires jambonz server version 10.1.1+ (the `agent` verb is commercial-only).

@@ -2,17 +2,17 @@
 
 ## What this is
 
-A research/test application for comparing voice AI pipeline configurations on jambonz. Single-file TypeScript WebSocket app using `@jambonz/sdk`. Runs on an EC2 server under pm2.
+A research/test application for comparing voice AI agent configurations on jambonz. Single-file TypeScript WebSocket app using `@jambonz/sdk`. Runs on an EC2 server under pm2.
 
 ## Stack
 
 - TypeScript (ESM, `"type": "module"`)
 - `@jambonz/sdk` WebSocket transport (`createEndpoint` / `makeService`)
-- `pipeline` verb (requires jambonz commercial v10.1.0+)
+- `agent` verb (requires jambonz commercial v10.1.1+)
 
 ## Architecture
 
-All code is in `src/app.ts`. A shared `handleSession` function builds the pipeline, parameterized by STT config and turn detection mode. Three services are registered on different WebSocket paths (`/`, `/flux`, `/aai`).
+All code is in `src/app.ts`. A shared `handleSession` function builds the agent, parameterized by STT config and turn detection mode. Three services are registered on different WebSocket paths (`/`, `/flux`, `/aai`).
 
 Application-configurable values (model, voice, system prompt) use jambonz env vars (`envVars` schema + `session.data.env_vars`), not `process.env`. The only `process.env` usage is `PORT` for the listening port.
 

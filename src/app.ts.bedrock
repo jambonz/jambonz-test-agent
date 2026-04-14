@@ -80,7 +80,6 @@ function handleSession(session: Session, opts: AgentOptions) {
 
   session
     .agent({
-      noiseIsolation: 'krisp',
       stt: opts.stt,
       tts: {
         vendor: opts.tts.vendor,
@@ -176,7 +175,7 @@ smSvc.on('session:new', (session) => {
     stt: {
       vendor: 'speechmaticspreview',
       language: 'en',
-      speechmaticsOptions: { profile: 'smart'}
+      speechmaticsOptions: { profile: 'adaptive'}
     },
     tts: { vendor: 'cartesia', voiceEnvVar: 'CARTESIA_VOICE' },
     turnDetection: 'stt',

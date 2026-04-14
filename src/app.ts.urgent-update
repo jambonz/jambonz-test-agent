@@ -69,8 +69,31 @@ function handleSession(session: Session, opts: AgentOptions) {
     || envVars[opts.tts.voiceEnvVar as keyof typeof envVars]?.default;
   const systemPrompt = session.data.env_vars?.SYSTEM_PROMPT || envVars.SYSTEM_PROMPT.default;
 
+  /* Simulate an urgent interrupt: while the agent is giving its second
+     response, fire a generate_reply with interrupt:true to simulate
+     a flash sale notification arriving from a backend system. */
+  let agentResponseCount = 0;
   session.on('/agent-event', (evt: Record<string, unknown>) => {
     log.info({payload: evt}, `agent event: ${evt.type}`);
+
+    if (evt.type === 'agent_response') {
+      agentResponseCount++;
+      if (agentResponseCount === 3) {
+        setTimeout(() => {
+          log.info('sending urgent interrupt — flash sale!');
+          session.updateAgent({
+            type: 'generate_reply',
+            interrupt: true,
+            user_input: [
+              'URGENT SYSTEM NOTIFICATION: A flash sale has just started.',
+              '40% off all MacBook Pros for the next hour only.',
+              'Interrupt what you are saying and enthusiastically tell the customer',
+              'about this incredible deal. Make it sound exciting and urgent.',
+            ].join(' '),
+          });
+        }, 2000);
+      }
+    }
   });
 
   session.on('/agent-complete', (evt: Record<string, unknown>) => {
@@ -80,7 +103,6 @@ function handleSession(session: Session, opts: AgentOptions) {
 
   session
     .agent({
-      noiseIsolation: 'krisp',
       stt: opts.stt,
       tts: {
         vendor: opts.tts.vendor,
@@ -176,7 +198,6 @@ smSvc.on('session:new', (session) => {
     stt: {
       vendor: 'speechmaticspreview',
       language: 'en',
-      speechmaticsOptions: { profile: 'smart'}
     },
     tts: { vendor: 'cartesia', voiceEnvVar: 'CARTESIA_VOICE' },
     turnDetection: 'stt',

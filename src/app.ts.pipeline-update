@@ -69,8 +69,39 @@ function handleSession(session: Session, opts: AgentOptions) {
     || envVars[opts.tts.voiceEnvVar as keyof typeof envVars]?.default;
   const systemPrompt = session.data.env_vars?.SYSTEM_PROMPT || envVars.SYSTEM_PROMPT.default;
 
+  /* Simulate a CRM lookup completing after the first turn.
+     After the user's first message, wait 3 seconds then inject
+     customer context — the agent will suddenly "know" the caller. */
+  let crmInjected = false;
   session.on('/agent-event', (evt: Record<string, unknown>) => {
     log.info({payload: evt}, `agent event: ${evt.type}`);
+
+    if (evt.type === 'turn_end' && !crmInjected) {
+      crmInjected = true;
+      setTimeout(() => {
+        log.info('injecting CRM context');
+        session.updateAgent({
+          type: 'inject_context',
+          messages: [
+            {
+              role: 'system',
+              content: [
+                'CUSTOMER CONTEXT (from CRM lookup):',
+                '- Name: Dave Horton',
+                '- Account tier: Gold',
+                '- Current device: MacBook Pro M2 (purchased 2023)',
+                '- Previous purchases: 3 MacBook Pros, 2 iPads',
+                '- Preferred payment: Apple Card with 3% cashback',
+                '- Note: eligible for corporate discount program (15% off)',
+                '',
+                'Use this information naturally in the conversation when relevant.',
+                'Do not dump all the info at once — weave it in as it becomes useful.',
+              ].join('\n'),
+            },
+          ],
+        });
+      }, 3000);
+    }
   });
 
   session.on('/agent-complete', (evt: Record<string, unknown>) => {
@@ -80,7 +111,6 @@ function handleSession(session: Session, opts: AgentOptions) {
 
   session
     .agent({
-      noiseIsolation: 'krisp',
       stt: opts.stt,
       tts: {
         vendor: opts.tts.vendor,
@@ -176,7 +206,6 @@ smSvc.on('session:new', (session) => {
     stt: {
       vendor: 'speechmaticspreview',
       language: 'en',
-      speechmaticsOptions: { profile: 'smart'}
     },
     tts: { vendor: 'cartesia', voiceEnvVar: 'CARTESIA_VOICE' },
     turnDetection: 'stt',

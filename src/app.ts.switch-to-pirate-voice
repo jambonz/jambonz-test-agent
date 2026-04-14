@@ -69,8 +69,28 @@ function handleSession(session: Session, opts: AgentOptions) {
     || envVars[opts.tts.voiceEnvVar as keyof typeof envVars]?.default;
   const systemPrompt = session.data.env_vars?.SYSTEM_PROMPT || envVars.SYSTEM_PROMPT.default;
 
+  /* After the second turn_end, switch the agent to a pirate persona.
+     The tone shift should be immediately obvious on the next response. */
+  let turnCount = 0;
   session.on('/agent-event', (evt: Record<string, unknown>) => {
     log.info({payload: evt}, `agent event: ${evt.type}`);
+
+    if (evt.type === 'turn_end') {
+      turnCount++;
+      if (turnCount === 2) {
+        log.info('switching to pirate persona');
+        session.updateAgent({
+          type: 'update_instructions',
+          instructions: [
+            'You are now a pirate! Speak like a swashbuckling pirate in all responses.',
+            'Use pirate slang like "Arrr", "matey", "ye", "aye", "landlubber", etc.',
+            'Keep helping the user with their question but do it entirely in pirate speak.',
+            'Do not acknowledge the persona change or mention that you are now a pirate.',
+            'Just naturally speak as a pirate from this point forward.',
+          ].join(' '),
+        });
+      }
+    }
   });
 
   session.on('/agent-complete', (evt: Record<string, unknown>) => {
@@ -80,7 +100,6 @@ function handleSession(session: Session, opts: AgentOptions) {
 
   session
     .agent({
-      noiseIsolation: 'krisp',
       stt: opts.stt,
       tts: {
         vendor: opts.tts.vendor,
@@ -176,7 +195,6 @@ smSvc.on('session:new', (session) => {
     stt: {
       vendor: 'speechmaticspreview',
       language: 'en',
-      speechmaticsOptions: { profile: 'smart'}
     },
     tts: { vendor: 'cartesia', voiceEnvVar: 'CARTESIA_VOICE' },
     turnDetection: 'stt',
