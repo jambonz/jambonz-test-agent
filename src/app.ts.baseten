@@ -1,0 +1,315 @@
+import * as http from 'node:http';
+import pino from 'pino';
+import { createEndpoint, Session } from '@jambonz/sdk/websocket';
+
+const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
+
+// ---------------------------------------------------------------------------
+// Tool: get_weather (open-meteo)
+// ---------------------------------------------------------------------------
+
+// Set TOOL_CALL_DELAY_MS to make the weather tool sleep before responding,
+// so actionHookDelayAction filler audio is audible during testing.
+// e.g. TOOL_CALL_DELAY_MS=6000 to hear several filler phrases.
+const TOOL_CALL_DELAY_MS = parseInt(process.env.TOOL_CALL_DELAY_MS || '0', 10);
+
+const weatherTool = {
+  name: 'get_weather',
+  description: 'Get the current temperature and wind speed for a given location.',
+  parameters: {
+    type: 'object',
+    properties: {
+      location: {
+        type: 'string',
+        description: 'City name or location, e.g. "San Francisco" or "Paris"',
+      },
+      scale: {
+        type: 'string',
+        enum: ['celsius', 'fahrenheit'],
+        description: 'Temperature unit, defaults to celsius',
+      },
+    },
+    required: ['location'],
+  },
+};
+
+interface WeatherArgs {
+  location?: string;
+  scale?: 'celsius' | 'fahrenheit';
+}
+
+interface GeocodingResponse {
+  results?: { latitude: number; longitude: number; name: string; country?: string }[];
+}
+
+interface ForecastResponse {
+  current: { temperature_2m: number; wind_speed_10m: number };
+}
+
+async function getWeather(location: string, scale: string, log: pino.Logger): Promise<string> {
+  const geoUrl = 'https://geocoding-api.open-meteo.com/v1/search?'
+    + `name=${encodeURIComponent(location)}&count=1&language=en&format=json`;
+  const geo = await fetch(geoUrl).then((r) => r.json() as Promise<GeocodingResponse>);
+  if (!geo.results?.length) throw new Error('location_not_found');
+
+  const { latitude, longitude, name, country } = geo.results[0];
+  log.info({ name, country, latitude, longitude }, 'geocoded location');
+
+  const fxUrl = 'https://api.open-meteo.com/v1/forecast?'
+    + `latitude=${latitude}&longitude=${longitude}`
+    + `&current=temperature_2m,wind_speed_10m&temperature_unit=${scale}`;
+  const { current } = await fetch(fxUrl).then((r) => r.json() as Promise<ForecastResponse>);
+
+  const unit = scale === 'fahrenheit' ? '°F' : '°C';
+  return `The current temperature in ${location} is ${current.temperature_2m}${unit}`
+    + ` with wind speed ${current.wind_speed_10m} km/h.`;
+}
+
+async function handleToolCall(
+  session: Session,
+  log: pino.Logger,
+  evt: { tool_call_id: string; name: string; arguments: WeatherArgs },
+) {
+  const { tool_call_id, name, arguments: args } = evt;
+  log.info({ name, args, tool_call_id }, 'toolHook fired');
+
+  if (name !== 'get_weather' || !args.location) {
+    session.sendToolOutput(tool_call_id, `Unknown or invalid tool call: ${name}`);
+    return;
+  }
+
+  try {
+    const result = await getWeather(args.location, args.scale || 'celsius', log);
+    if (TOOL_CALL_DELAY_MS > 0) {
+      log.info(`tool-call: artificial delay of ${TOOL_CALL_DELAY_MS}ms to exercise filler audio`);
+      await new Promise((resolve) => setTimeout(resolve, TOOL_CALL_DELAY_MS));
+    }
+    log.info({ result }, 'sending tool output');
+    session.sendToolOutput(tool_call_id, result);
+  } catch (err) {
+    const e = err as Error;
+    log.error({ err: e, name }, 'tool call error');
+    const msg = e.message === 'location_not_found'
+      ? `Sorry, I could not find weather data for "${args.location}".`
+      : `Error fetching weather: ${e.message}`;
+    session.sendToolOutput(tool_call_id, msg);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Filler audio: spoken while a tool call is in flight so the caller
+// is not left in dead air. Cycles through `actions` up to `retries` times.
+// ---------------------------------------------------------------------------
+
+const toolCallFiller = {
+  enabled: true,
+  noResponseTimeout: 2,
+  retries: 3,
+  actions: [
+    { verb: 'say', text: 'Let me check that for you.' },
+    { verb: 'say', text: 'Still looking that up.' },
+    { verb: 'say', text: 'One moment, almost there.' },
+  ],
+};
+
+// ---------------------------------------------------------------------------
+// Env vars exposed to the jambonz portal
+// ---------------------------------------------------------------------------
+
+const envVars = {
+  CARTESIA_VOICE: {
+    type: 'string' as const,
+    description: 'Cartesia voice ID',
+    default: '9626c31c-bec5-4cca-baa8-f8ba9e84c8bc',
+  },
+  ELEVENLABS_VOICE: {
+    type: 'string' as const,
+    description: 'ElevenLabs voice id',
+    default: 'hpp4J3VqNfWAUOO0d1Us',
+  },
+  BASETEN_MODEL: {
+    type: 'string' as const,
+    description:
+      'Baseten Model APIs model id. Defaults to GLM-4.7 (non-reasoning, '
+      + 'tool-capable, ~200K ctx). Other options: deepseek-ai/DeepSeek-V3.1, '
+      + 'moonshotai/Kimi-K2.5 (vision), openai/gpt-oss-120b.',
+    default: 'zai-org/GLM-4.7',
+  },
+  SYSTEM_PROMPT: {
+    type: 'string' as const,
+    description: 'System prompt for the voice agent',
+    uiHint: 'textarea' as const,
+    default: [
+      'You are a helpful voice AI assistant.',
+      'The user is interacting with you via voice,',
+      'even if you perceive the conversation as text.',
+      'You eagerly assist users with their questions',
+      'by providing information from your extensive knowledge.',
+      'When the user asks about current weather conditions for a location,',
+      'always call the get_weather tool to fetch real data — never guess.',
+      'Your responses are concise, to the point,',
+      'and use natural spoken English with proper punctuation.',
+      'Never use markdown, bullet points, numbered lists,',
+      'emojis, asterisks, or any special formatting.',
+      'You are curious, friendly, and have a sense of humor.',
+      'When the conversation begins,',
+      'greet the user in a helpful and friendly manner.',
+    ].join(' '),
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Session handler
+// ---------------------------------------------------------------------------
+
+interface SttConfig {
+  vendor: string;
+  language?: string;
+  deepgramOptions?: Record<string, unknown>;
+  assemblyAiOptions?: Record<string, unknown>;
+  speechmaticsOptions?: Record<string, unknown>;
+}
+
+interface TtsConfig {
+  vendor: string;
+  voiceEnvVar: keyof typeof envVars;
+  options?: Record<string, unknown>;
+}
+
+interface AgentOptions {
+  stt: SttConfig;
+  tts: TtsConfig;
+  turnDetection: 'krisp' | 'stt';
+  noiseIsolation?: 'krisp' | 'rnnoise';
+}
+
+function resolveVoice(session: Session, voiceEnvVar: keyof typeof envVars): string {
+  return session.data.env_vars?.[voiceEnvVar] || envVars[voiceEnvVar].default;
+}
+
+function handleSession(session: Session, opts: AgentOptions) {
+  const log = logger.child({ call_sid: session.callSid });
+  const voice = resolveVoice(session, opts.tts.voiceEnvVar);
+  const systemPrompt = session.data.env_vars?.SYSTEM_PROMPT || envVars.SYSTEM_PROMPT.default;
+  const basetenModel = session.data.env_vars?.BASETEN_MODEL || envVars.BASETEN_MODEL.default;
+
+  session.on('/agent-event', (evt: Record<string, unknown>) => {
+    log.info({ payload: evt }, `agent event: ${evt.type}`);
+  });
+
+  session.on('/agent-complete', (evt: Record<string, unknown>) => {
+    log.info({ payload: evt }, 'agent completed');
+    session.hangup().reply();
+  });
+
+  session.on('/tool-call', (evt) => handleToolCall(
+    session,
+    log,
+    evt as { tool_call_id: string; name: string; arguments: WeatherArgs },
+  ));
+
+  // Cast: SDK type definitions don't yet expose `actionHookDelayAction`
+  // on the agent verb. The runtime accepts it.
+  type AgentArg = Parameters<typeof session.agent>[0];
+  const agentArg: AgentArg = {
+    stt: opts.stt,
+    tts: {
+      vendor: opts.tts.vendor,
+      voice,
+      ...opts.tts.options && { options: opts.tts.options },
+    },
+    llm: {
+      vendor: 'baseten',
+      model: basetenModel,
+      llmOptions: {
+        maxTokens: 1024,
+        systemPrompt,
+        tools: [weatherTool],
+      },
+    },
+    turnDetection: opts.turnDetection,
+    ...opts.noiseIsolation && { noiseIsolation: opts.noiseIsolation },
+    earlyGeneration: true,
+    bargeIn: { enable: true },
+    toolHook: '/tool-call',
+    eventHook: '/agent-event',
+    actionHook: '/agent-complete',
+    actionHookDelayAction: toolCallFiller,
+  } as AgentArg;
+
+  session.agent(agentArg).send();
+}
+
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
+
+const port = parseInt(process.env.PORT || '3000', 10);
+const server = http.createServer();
+const makeService = createEndpoint({ server, port, envVars });
+
+/* Deepgram nova-3 + Krisp turn detection */
+makeService({ path: '/' }).on('session:new', (session) => {
+  handleSession(session, {
+    stt: {
+      vendor: 'deepgram',
+      language: 'multi',
+      deepgramOptions: { model: 'nova-3-general' },
+    },
+    tts: { vendor: 'cartesia', voiceEnvVar: 'CARTESIA_VOICE' },
+    turnDetection: 'krisp',
+  });
+});
+
+/* Deepgram Flux + native turn detection */
+makeService({ path: '/flux' }).on('session:new', (session) => {
+  handleSession(session, {
+    stt: { vendor: 'deepgramflux' },
+    tts: { vendor: 'cartesia', voiceEnvVar: 'CARTESIA_VOICE' },
+    turnDetection: 'stt',
+  });
+});
+
+/* AssemblyAI u3-rt-pro + native turn detection */
+makeService({ path: '/aai' }).on('session:new', (session) => {
+  handleSession(session, {
+    stt: {
+      vendor: 'assemblyai',
+      assemblyAiOptions: { languageDetection: true },
+    },
+    tts: { vendor: 'cartesia', voiceEnvVar: 'CARTESIA_VOICE' },
+    turnDetection: 'stt',
+  });
+});
+
+/* Deepgram nova-3 + Krisp turn detection + ElevenLabs TTS */
+makeService({ path: '/elevenlabs' }).on('session:new', (session) => {
+  handleSession(session, {
+    stt: {
+      vendor: 'deepgram',
+      language: 'multi',
+      deepgramOptions: { model: 'nova-3-general' },
+    },
+    tts: {
+      vendor: 'elevenlabs',
+      voiceEnvVar: 'ELEVENLABS_VOICE',
+      options: { model_id: 'eleven_flash_v2_5' },
+    },
+    turnDetection: 'krisp',
+  });
+});
+
+/* Speechmatics preview + native turn detection */
+makeService({ path: '/speechmatics' }).on('session:new', (session) => {
+  handleSession(session, {
+    stt: {
+      vendor: 'speechmaticspreview',
+      language: 'en',
+      speechmaticsOptions: { profile: 'smart' },
+    },
+    tts: { vendor: 'cartesia', voiceEnvVar: 'CARTESIA_VOICE' },
+    turnDetection: 'stt',
+  });
+});
+
+logger.info({ port }, 'jambonz voice agent listening');
