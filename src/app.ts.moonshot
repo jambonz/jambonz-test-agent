@@ -1,0 +1,172 @@
+import * as http from 'node:http';
+import pino from 'pino';
+import { createEndpoint, Session } from '@jambonz/sdk/websocket';
+
+const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
+
+/* Tools to exercise tool-calling over voice. Canned results (no external APIs) —
+ * the point is to verify the model emits well-formed tool calls.
+ *   lookup_weather: "what's the weather in Paris?"
+ *   book_flight:    "book me a flight from SFO to JFK"
+ *   check_balance:  "what's my account balance?" */
+const TOOLS = [
+  {
+    name: 'lookup_weather',
+    description: 'Get the current weather for a city',
+    parameters: {
+      type: 'object',
+      properties: { city: { type: 'string', description: 'City name' } },
+      required: ['city'],
+    },
+  },
+  {
+    name: 'book_flight',
+    description: 'Book a flight between two airports',
+    parameters: {
+      type: 'object',
+      properties: {
+        from: { type: 'string' },
+        to: { type: 'string' },
+      },
+      required: ['from', 'to'],
+    },
+  },
+  {
+    name: 'check_balance',
+    description: 'Check the account balance',
+    parameters: { type: 'object', properties: {} },
+  },
+];
+
+/* Dispatches a tool call to its implementation. Returns a plain object that the
+ * SDK stringifies and feeds back to the LLM. */
+function runTool(name: string, args: Record<string, unknown>): unknown {
+  switch (name) {
+    case 'lookup_weather':
+      return { city: args.city, temp_f: 58, condition: 'cloudy' };
+    case 'book_flight':
+      return { confirmation: 'ABC123', from: args.from, to: args.to, departure: '3pm' };
+    case 'check_balance':
+      return { balance_usd: 1234.56 };
+    default:
+      return { error: `unknown tool ${name}` };
+  }
+}
+
+const envVars = {
+  MOONSHOT_MODEL: {
+    type: 'string' as const,
+    description: 'Moonshot (Kimi) model to use',
+    default: 'kimi-k2-0711-preview',
+  },
+  MOONSHOT_LABEL: {
+    type: 'string' as const,
+    description: 'jambonz credential label for the Moonshot (OpenAI-compatible) API key',
+    default: '',
+  },
+  MOONSHOT_BASE_URL: {
+    type: 'string' as const,
+    description: 'Moonshot OpenAI-compatible API base URL',
+    default: 'https://api.moonshot.ai/v1',
+  },
+  CARTESIA_VOICE: {
+    type: 'string' as const,
+    description: 'Cartesia voice ID',
+    default: '9626c31c-bec5-4cca-baa8-f8ba9e84c8bc',
+  },
+  SYSTEM_PROMPT: {
+    type: 'string' as const,
+    description: 'System prompt for the voice agent',
+    uiHint: 'textarea' as const,
+    default: [
+      'You are a helpful voice AI assistant.',
+      'The user is interacting with you via voice,',
+      'even if you perceive the conversation as text.',
+      'You eagerly assist users with their questions',
+      'by providing information from your extensive knowledge.',
+      'Your responses are concise, to the point,',
+      'and use natural spoken English with proper punctuation.',
+      'Never use markdown, bullet points, numbered lists,',
+      'emojis, asterisks, or any special formatting.',
+      'You are curious, friendly, and have a sense of humor.',
+      'When the conversation begins,',
+      'greet the user in a helpful and friendly manner.',
+    ].join(' '),
+  },
+};
+
+function handleSession(session: Session) {
+  const log = logger.child({ call_sid: session.callSid });
+  const model = session.data.env_vars?.MOONSHOT_MODEL || envVars.MOONSHOT_MODEL.default;
+  const label = session.data.env_vars?.MOONSHOT_LABEL || envVars.MOONSHOT_LABEL.default;
+  const baseURL = session.data.env_vars?.MOONSHOT_BASE_URL || envVars.MOONSHOT_BASE_URL.default;
+  const voice = session.data.env_vars?.CARTESIA_VOICE || envVars.CARTESIA_VOICE.default;
+  let systemPrompt = session.data.env_vars?.SYSTEM_PROMPT || envVars.SYSTEM_PROMPT.default;
+  /* Nudge the model toward the tools instead of answering from its own knowledge. */
+  systemPrompt += ' You have tools available: lookup_weather (for weather questions),' +
+    ' book_flight (for flight bookings), and check_balance (for account balance).' +
+    ' Always call the appropriate tool — never answer from your own knowledge for these topics.';
+
+  session.on('/agent-event', (evt: Record<string, unknown>) => {
+    log.info({ payload: evt }, `agent event: ${evt.type}`);
+  });
+
+  session.on('/agent-complete', (evt: Record<string, unknown>) => {
+    log.info({ payload: evt }, 'agent completed');
+    session.hangup().reply();
+  });
+
+  /* Tool-call handler — arrives on the toolHook path (also emitted as
+   * 'agent:tool-call'). Runs the tool synchronously and returns the result. */
+  session.on('agent:tool-call', (evt: Record<string, unknown>) => {
+    const id = evt.tool_call_id as string;
+    const name = evt.name as string;
+    const args = (evt.arguments as Record<string, unknown>) || {};
+    log.info({ id, name, args }, '[tool-call] received');
+    const result = runTool(name, args);
+    log.info({ id, name, result }, '[tool-call] returning result');
+    session.sendToolOutput(id, result);
+  });
+
+  /* Moonshot (Kimi) is reached through jambonz's OpenAI-compatible adapter
+   * (vendor: 'moonshot') with a baseURL override — it is not a first-class agent
+   * LLM vendor. The API key is resolved from a jambonz credential keyed by
+   * `label` (no key in source). */
+  const agentConfig: Record<string, unknown> = {
+    stt: {
+      vendor: 'deepgram',
+      language: 'multi',
+      deepgramOptions: { model: 'nova-3-general' },
+    },
+    tts: { vendor: 'cartesia', voice },
+    llm: {
+      vendor: 'moonshot',
+      model,
+      ...((label && { label }) || {}),
+      connectOptions: { baseURL },
+      llmOptions: {
+        messages: [
+          { role: 'system', content: systemPrompt },
+        ],
+        tools: TOOLS,
+      },
+    },
+    turnDetection: 'krisp',
+    earlyGeneration: true,
+    bargeIn: { enable: true },
+    eventHook: '/agent-event',
+    actionHook: '/agent-complete',
+    toolHook: '/tool-call',
+  };
+
+  session.agent(agentConfig as Parameters<Session['agent']>[0]).send();
+}
+
+const port = parseInt(process.env.PORT || '3000', 10);
+const server = http.createServer();
+const makeService = createEndpoint({ server, port, envVars });
+
+const svc = makeService({ path: '/' });
+svc.on('session:new', (session) => handleSession(session));
+
+logger.info({ port }, 'jambonz moonshot voice agent listening');

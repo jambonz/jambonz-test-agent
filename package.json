@@ -13,7 +13,7 @@
     "node": ">=22.0.0"
   },
   "dependencies": {
-    "@jambonz/sdk": "^0.4.2",
+    "@jambonz/sdk": "^0.8.1",
     "pino": "^10.3.1"
   },
   "devDependencies": {
