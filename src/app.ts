@@ -263,7 +263,9 @@ const TRIAL_RESULTS: Record<string, unknown> = {
 
 function handleToolTrialSession(session: Session) {
   const log = logger.child({ call_sid: session.callSid, flow: 'flux-tools' });
-  const env = session.data.env_vars || {};
+  /* portal app env vars win; the process environment is the fallback for a
+     system whose portal doesn't show them */
+  const env = {...process.env, ...(session.data.env_vars || {})} as Record<string, string | undefined>;
   const vendor = env.TOOLS_LLM_VENDOR || envVars.TOOLS_LLM_VENDOR.default;
   const model = env.TOOLS_LLM_MODEL || envVars.TOOLS_LLM_MODEL.default;
   const eagerEotThreshold = parseFloat(env.FLUX_EAGER_EOT_THRESHOLD || envVars.FLUX_EAGER_EOT_THRESHOLD.default);
