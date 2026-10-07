@@ -20,6 +20,21 @@ const envVars = {
     description: 'ElevenLabs voice id',
     default: 'hpp4J3VqNfWAUOO0d1Us',
   },
+  TOOLS_BEDROCK_MODEL: {
+    type: 'string' as const,
+    description: 'Bedrock model for the /flux-tools early-generation trial',
+    default: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+  },
+  FLUX_EAGER_EOT_THRESHOLD: {
+    type: 'string' as const,
+    description: '/flux-tools: Deepgram Flux eagerEotThreshold (early end-of-turn signal that starts the LLM)',
+    default: '0.5',
+  },
+  FLUX_EOT_THRESHOLD: {
+    type: 'string' as const,
+    description: '/flux-tools: Deepgram Flux eotThreshold (confirmed end of turn)',
+    default: '0.7',
+  },
   SYSTEM_PROMPT: {
     type: 'string' as const,
     description: 'System prompt for the voice agent',
@@ -182,6 +197,116 @@ smSvc.on('session:new', (session) => {
     turnDetection: 'stt',
   });
 });
+
+/* Early generation with tools (trial): Deepgram Flux EagerEndOfTurn starts the
+   LLM before the turn is confirmed, and the agent has tools shaped like an
+   outbound campaign's (record the outcome + act, often in one batch). The
+   tools are simulated and every execution is logged and counted per call:
+   each should run once, and only for a confirmed turn — never for a guess. */
+const TRIAL_PROMPT = [
+  'You are Maya, calling from Acme Solar about the free solar quote the person requested online.',
+  'You are on a phone call: speak naturally, one or two short sentences at a time, no formatting.',
+  'Greet them, confirm you are speaking with the person who asked for a quote, and ask if they',
+  'have a minute to be connected with a specialist who can give them their quote.',
+  'If they agree: in ONE response say a short line like "Great, one moment please" and call BOTH',
+  'record_lead and transfer_to_specialist.',
+  'If they want a call later: ask when, then call schedule_callback and say goodbye.',
+  'If they are not interested: call mark_not_interested, thank them, and say goodbye.',
+].join(' ');
+
+const TRIAL_TOOLS = [
+  {
+    name: 'record_lead',
+    description: 'Record that the caller agreed to talk to a specialist.',
+    parameters: {type: 'object', properties: {}},
+  },
+  {
+    name: 'transfer_to_specialist',
+    description: 'Transfer the caller to a solar specialist.',
+    parameters: {type: 'object', properties: {}},
+  },
+  {
+    name: 'schedule_callback',
+    description: 'Schedule a call back at the time the caller asked for.',
+    parameters: {
+      type: 'object',
+      properties: {
+        date: {type: 'string', description: 'YYYY-MM-DD'},
+        time: {type: 'string', description: 'HH:MM, 24-hour'},
+      },
+      required: ['date', 'time'],
+    },
+  },
+  {
+    name: 'mark_not_interested',
+    description: 'Record that the caller is not interested.',
+    parameters: {type: 'object', properties: {}},
+  },
+];
+
+const TRIAL_RESULTS: Record<string, unknown> = {
+  record_lead: {ok: true},
+  transfer_to_specialist: {ok: true, note: 'simulated: no real transfer; tell the caller they are being connected'},
+  schedule_callback: {ok: true},
+  mark_not_interested: {ok: true},
+};
+
+function handleToolTrialSession(session: Session) {
+  const log = logger.child({ call_sid: session.callSid, flow: 'flux-tools' });
+  const env = session.data.env_vars || {};
+  const model = env.TOOLS_BEDROCK_MODEL || envVars.TOOLS_BEDROCK_MODEL.default;
+  const eagerEotThreshold = parseFloat(env.FLUX_EAGER_EOT_THRESHOLD || envVars.FLUX_EAGER_EOT_THRESHOLD.default);
+  const eotThreshold = parseFloat(env.FLUX_EOT_THRESHOLD || envVars.FLUX_EOT_THRESHOLD.default);
+  const voice = env.CARTESIA_VOICE || envVars.CARTESIA_VOICE.default;
+  const executed: Record<string, number> = {};
+  /* as at Voizer; the schema allows `strategy`, this SDK's types predate it */
+  const bargeIn = { enable: true, strategy: 'interruptPrediction' };
+
+  session.on('/tool-call', (evt: Record<string, unknown>) => {
+    const name = String(evt.name);
+    executed[name] = (executed[name] || 0) + 1;
+    log.info({tool: name, args: evt.arguments, tool_call_id: evt.tool_call_id, count: executed[name]},
+      'trial tool executed');
+    session.sendToolOutput(String(evt.tool_call_id), TRIAL_RESULTS[name] ?? {ok: false, error: 'unknown tool'});
+  });
+
+  session.on('/agent-event', (evt: Record<string, unknown>) => {
+    log.info({payload: evt}, `agent event: ${evt.type}`);
+  });
+
+  session.on('/agent-complete', (evt: Record<string, unknown>) => {
+    /* the trial's result per call: every count should be 0 or 1 */
+    log.info({payload: evt, executed}, 'agent completed (flux-tools trial)');
+    session.hangup().reply();
+  });
+
+  session
+    .agent({
+      stt: {
+        vendor: 'deepgramflux',
+        deepgramOptions: { eagerEotThreshold, eotThreshold },
+      },
+      tts: { vendor: 'cartesia', voice },
+      llm: {
+        vendor: 'bedrock',
+        model,
+        llmOptions: {
+          messages: [{ role: 'system', content: TRIAL_PROMPT }],
+          tools: TRIAL_TOOLS,
+        },
+      },
+      turnDetection: 'stt',
+      earlyGeneration: true,
+      bargeIn,
+      toolHook: '/tool-call',
+      eventHook: '/agent-event',
+      actionHook: '/agent-complete',
+    })
+    .send();
+}
+
+const fluxToolsSvc = makeService({ path: '/flux-tools' });
+fluxToolsSvc.on('session:new', (session) => handleToolTrialSession(session));
 
 logger.info({ port }, 'jambonz voice agent listening');
 
