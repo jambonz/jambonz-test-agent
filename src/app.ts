@@ -20,10 +20,20 @@ const envVars = {
     description: 'ElevenLabs voice id',
     default: 'hpp4J3VqNfWAUOO0d1Us',
   },
-  TOOLS_BEDROCK_MODEL: {
+  TOOLS_LLM_VENDOR: {
     type: 'string' as const,
-    description: 'Bedrock model for the /flux-tools early-generation trial',
+    description: '/flux-tools: LLM vendor (an LLM credential for it must exist in the account)',
+    default: 'bedrock',
+  },
+  TOOLS_LLM_MODEL: {
+    type: 'string' as const,
+    description: '/flux-tools: LLM model (e.g. anthropic/claude-haiku-4.5 for vendor openai via OpenRouter)',
     default: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+  },
+  BARGE_IN_STRATEGY: {
+    type: 'string' as const,
+    description: '/flux-tools: barge-in strategy, interruptPrediction (needs a Krisp key) or vad',
+    default: 'interruptPrediction',
   },
   FLUX_EAGER_EOT_THRESHOLD: {
     type: 'string' as const,
@@ -254,13 +264,14 @@ const TRIAL_RESULTS: Record<string, unknown> = {
 function handleToolTrialSession(session: Session) {
   const log = logger.child({ call_sid: session.callSid, flow: 'flux-tools' });
   const env = session.data.env_vars || {};
-  const model = env.TOOLS_BEDROCK_MODEL || envVars.TOOLS_BEDROCK_MODEL.default;
+  const vendor = env.TOOLS_LLM_VENDOR || envVars.TOOLS_LLM_VENDOR.default;
+  const model = env.TOOLS_LLM_MODEL || envVars.TOOLS_LLM_MODEL.default;
   const eagerEotThreshold = parseFloat(env.FLUX_EAGER_EOT_THRESHOLD || envVars.FLUX_EAGER_EOT_THRESHOLD.default);
   const eotThreshold = parseFloat(env.FLUX_EOT_THRESHOLD || envVars.FLUX_EOT_THRESHOLD.default);
   const voice = env.CARTESIA_VOICE || envVars.CARTESIA_VOICE.default;
   const executed: Record<string, number> = {};
-  /* as at Voizer; the schema allows `strategy`, this SDK's types predate it */
-  const bargeIn = { enable: true, strategy: 'interruptPrediction' };
+  /* the schema allows `strategy`; this SDK's types predate it */
+  const bargeIn = { enable: true, strategy: env.BARGE_IN_STRATEGY || envVars.BARGE_IN_STRATEGY.default };
 
   session.on('/tool-call', (evt: Record<string, unknown>) => {
     const name = String(evt.name);
@@ -273,6 +284,8 @@ function handleToolTrialSession(session: Session) {
   session.on('/agent-event', (evt: Record<string, unknown>) => {
     log.info({payload: evt}, `agent event: ${evt.type}`);
   });
+
+  log.info({vendor, model, eagerEotThreshold, eotThreshold, bargeIn: bargeIn.strategy}, 'flux-tools trial call');
 
   session.on('/agent-complete', (evt: Record<string, unknown>) => {
     /* the trial's result per call: every count should be 0 or 1 */
@@ -288,7 +301,7 @@ function handleToolTrialSession(session: Session) {
       },
       tts: { vendor: 'cartesia', voice },
       llm: {
-        vendor: 'bedrock',
+        vendor,
         model,
         llmOptions: {
           messages: [{ role: 'system', content: TRIAL_PROMPT }],

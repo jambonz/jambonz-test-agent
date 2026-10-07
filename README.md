@@ -21,7 +21,9 @@ These are configurable from the jambonz portal:
 |----------|---------|-------------|
 | `OPENAI_MODEL` | `gpt-4.1-mini` | OpenAI model for the LLM |
 | `CARTESIA_VOICE` | `9626c31c-bec5-4cca-baa8-f8ba9e84c8bc` | Cartesia voice ID |
-| `TOOLS_BEDROCK_MODEL` | `us.anthropic.claude-haiku-4-5-20251001-v1:0` | `/flux-tools`: Bedrock model |
+| `TOOLS_LLM_VENDOR` | `bedrock` | `/flux-tools`: LLM vendor (the account needs an LLM credential for it) |
+| `TOOLS_LLM_MODEL` | `us.anthropic.claude-haiku-4-5-20251001-v1:0` | `/flux-tools`: LLM model, e.g. `anthropic/claude-haiku-4.5` with vendor `openai` via OpenRouter |
+| `BARGE_IN_STRATEGY` | `interruptPrediction` | `/flux-tools`: `interruptPrediction` (needs a Krisp key) or `vad` |
 | `FLUX_EAGER_EOT_THRESHOLD` | `0.5` | `/flux-tools`: Flux `eagerEotThreshold` (starts the LLM early) |
 | `FLUX_EOT_THRESHOLD` | `0.7` | `/flux-tools`: Flux `eotThreshold` (confirmed end of turn) |
 | `SYSTEM_PROMPT` | *(see source)* | System prompt for the voice agent |
