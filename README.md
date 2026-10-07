@@ -9,7 +9,7 @@ A jambonz voice AI agent using the `agent` verb with multiple STT backends for c
 | `/` | Deepgram nova-3-general | Krisp | Multilingual, acoustic end-of-turn via Krisp |
 | `/flux` | Deepgram Flux | Native (STT) | Acoustic + semantic turn detection built into Deepgram Flux |
 | `/aai` | AssemblyAI universal-3 pro | Native (STT) | v3 streaming API with native turn detection, language detection enabled |
-| `/flux-tools` | Deepgram Flux | Native (STT) + early generation | Trial of early generation **with tools**: Flux `EagerEndOfTurn` starts the LLM early; an outbound-campaign prompt with simulated tools (`record_lead`, `transfer_to_specialist`, `schedule_callback`, `mark_not_interested`). Every tool execution is logged (`trial tool executed`) and counted per call (`executed` on `agent completed`): each tool should run at most once, and only for a confirmed turn. Needs feature-server with jambonz/feature-server#252. |
+| `/flux-tools` | Deepgram Flux | Native (STT) + early generation | Trial of early generation **with tools**: Flux `EagerEndOfTurn` starts the LLM early; an outbound-campaign prompt with simulated tools (`record_lead`, `transfer_to_specialist`, `schedule_callback`, `mark_not_interested`). TTS is Deepgram `aura-2-asteria-en`, so the system needs only a Deepgram and an LLM credential. Every tool execution is logged (`trial tool executed`) and counted per call (`executed` on `agent completed`): each tool should run at most once, and only for a confirmed turn. Needs feature-server with jambonz/feature-server#252. |
 
 All callflows share the same TTS (Cartesia), LLM (OpenAI), barge-in settings, and system prompt.
 

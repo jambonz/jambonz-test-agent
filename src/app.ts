@@ -268,7 +268,6 @@ function handleToolTrialSession(session: Session) {
   const model = env.TOOLS_LLM_MODEL || envVars.TOOLS_LLM_MODEL.default;
   const eagerEotThreshold = parseFloat(env.FLUX_EAGER_EOT_THRESHOLD || envVars.FLUX_EAGER_EOT_THRESHOLD.default);
   const eotThreshold = parseFloat(env.FLUX_EOT_THRESHOLD || envVars.FLUX_EOT_THRESHOLD.default);
-  const voice = env.CARTESIA_VOICE || envVars.CARTESIA_VOICE.default;
   const executed: Record<string, number> = {};
   /* the schema allows `strategy`; this SDK's types predate it */
   const bargeIn = { enable: true, strategy: env.BARGE_IN_STRATEGY || envVars.BARGE_IN_STRATEGY.default };
@@ -299,7 +298,7 @@ function handleToolTrialSession(session: Session) {
         vendor: 'deepgramflux',
         deepgramOptions: { eagerEotThreshold, eotThreshold },
       },
-      tts: { vendor: 'cartesia', voice },
+      tts: { vendor: 'deepgram', voice: 'aura-2-asteria-en' },   // as Voizer's English campaigns
       llm: {
         vendor,
         model,
